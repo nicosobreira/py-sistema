@@ -1,0 +1,52 @@
+[project]
+name = "sistema"
+version = "0.1.0"
+description = "Aplicativo"
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = [
+]
+authors = [
+  { name = "Nícolas Perez", email = "nicolau.sobreira@gmail.com" },
+]
+
+[project.scripts]
+sistema = "sistema.main:main"
+
+# Essa é a ferramente empacota e distruibui o código.
+[build-system]
+requires = ["uv_build>=0.12.1,<0.13"]
+build-backend = "uv_build"
+
+# ----------------------------------------------------------
+# Ferramentas para auxiliar o desenvolvimento.
+# ----------------------------------------------------------
+
+[dependency-groups]
+dev = [
+  "ruff>=0.16.1",
+  "pyright>=1.1.411",
+]
+
+# Ferramenta de Linting: Previne erros e más práticas comuns, como não usar uma variável declarada.
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "B", "UP", "C90", "SIM", "RUF"]
+ignore = []
+
+[tool.ruff.lint.mccabe]
+max-complexity = 10
+
+# Formata o código para manter uma aparência agradável
+[tool.ruff.format]
+quote-style = "double"
+
+# Faz verificações nos tipos das variáveis
+[tool.pyright]
+diagnosticMode = "workspace"
+useLibraryCodeForTypes = true
+venvPath = "."
+venv = ".venv"
+exclude = ["**/__pycache__", "build"]
