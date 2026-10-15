@@ -1,7 +1,8 @@
 import unicodedata
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 
-import leia
+import frontend.cli.leia as leia
+import frontend.cli.style as style
 
 # TODO: Adicionar um formulario com setinhas, mais parecido com um TUI.
 
@@ -12,27 +13,51 @@ def remover_acentos(texto: str) -> str:
     return normalizado.encode("ascii", "ignore").decode("utf-8")
 
 
+def normalizado(texto: str) -> str:
+    return remover_acentos(texto.lower()).replace(" ", "_")
+
+
+def normalizar_telefone(telefone: str) -> str:
+    return telefone.replace(" ", "").replace("(", "").replace(")", "").replace("-", "")
+
+
 @dataclass
-class InfoPessoal:
+class AlunoPublico:
+    codigo_curso: int
     nome: str
-    cpf: str
     email: str
     telefone: str
+    prontuario: int = -1
+
+
+@dataclass
+class AlunoPrivado:
+    cpf: str
 
 
 @dataclass
 class Aluno:
-    info_pessoal: InfoPessoal
-    prontuario: int
-    codigo_curso: int
+    privado: AlunoPrivado
+    publico: AlunoPublico
+
+
+ALUNO_CAMPOS_PUBLICOS = {f.name for f in fields(AlunoPublico)}
 
 
 class Alunos:
     lista: list[Aluno]
-    prontuario_count: int = 0
+    prontuario_count: int
 
     def __init__(self):
         self.lista = []
+        self.prontuario_count = 0
+        self._comparadores = {
+            "nome": self._procurar_nome,
+            "email": self._procurar_email,
+            "telefone": self._procurar_telefone,
+            "codigo_curso": self._procurar_codigo_curso,
+            "prontuario": self._procurar_prontuario,
+        }
 
     def _gerar_prontuario(self):
         gerado = self.prontuario_count
@@ -41,14 +66,53 @@ class Alunos:
 
         return gerado
 
-    def adicionar(self, info_pessoal: InfoPessoal, codigo_curso: int):
-        aluno = Aluno(
-            info_pessoal=info_pessoal,
-            prontuario=self._gerar_prontuario(),
-            codigo_curso=codigo_curso,
-        )
+    # TODO: Adicionar exceptions se o email ou telefone forem iguais
+    def adicionar(self, privado: AlunoPrivado, publico: AlunoPublico):
+        aluno = Aluno(privado=privado, publico=publico)
+
+        aluno.publico.prontuario = self._gerar_prontuario()
 
         self.lista.append(aluno)
+
+    # Sem dados sensíveis
+    def lista_publica(self) -> list[AlunoPublico]:
+        compartilhar = []
+
+        for aluno in self.lista:
+            compartilhar.append(aluno.publico)
+
+        return compartilhar
+
+    def _procurar_nome(self, atual: str, recebido: str) -> bool:
+        return normalizado(recebido) in normalizado(atual)
+
+    def _procurar_email(self, atual: str, recebido: str) -> bool:
+        return normalizado(recebido) in normalizado(atual)
+
+    def _procurar_telefone(self, atual: str, recebido: str) -> bool:
+        return normalizar_telefone(recebido) == normalizar_telefone(atual)
+
+    def _procurar_codigo_curso(self, atual: int, recebido: int) -> bool:
+        return recebido == atual
+
+    def _procurar_prontuario(self, atual: int, recebido: int) -> bool:
+        return recebido == atual
+
+    def _casa(self, aluno: AlunoPublico, criterios: dict) -> bool:
+        return all(
+            self._comparadores[campo](getattr(aluno, campo), procurado)
+            for campo, procurado in criterios.items()
+        )
+
+    def buscar(self, criterios: dict) -> list[AlunoPublico]:
+        invalidos = criterios.keys() - ALUNO_CAMPOS_PUBLICOS
+        if invalidos:
+            raise ValueError(f"Campos inválidos: {sorted(invalidos)}")
+
+        return [aluno.publico for aluno in self.lista if self._casa(aluno.publico, criterios)]
+
+    def esta_vazio(self) -> bool:
+        return len(self.lista) == 0
 
 
 class CursoTag:
@@ -58,9 +122,20 @@ class CursoTag:
         self.tag = self.formatar(nome)
 
     def formatar(self, nome: str) -> str:
-        return remover_acentos(nome.lower().replace(" ", "_"))
+        return normalizado(nome)
+
+    def __hash__(self) -> int:
+        return hash(self.tag)
+
+    def __eq__(self, outro):
+        return isinstance(outro, CursoTag) and self.tag == outro.tag
 
 
+# TODO: Será que eu coloco o código do curso como um identificador?
+# Ai eu poderia ter um dicionário com o `CursoTag` e os outros atributos, como
+# o usuário vai digitar o nome do curso ou o codigo dele
+# TODO: O usuário vai acessar o curso a partir do NOME ou CÓDIGO, como fazer a busca pelo
+# curso se aproveitar disso?
 @dataclass
 class CursoIdentificador:
     tag: CursoTag
@@ -91,7 +166,7 @@ class Cursos:
     def adicionar(self, identificador: CursoIdentificador, semestres: int):
         curso = Curso(identificador=identificador, semestres=semestres, codigo=self._gerar_codigo())
 
-        self.tags[curso.identificador.tag] = curso.codigo
+        self.tags.setdefault(curso.identificador.tag, curso.codigo)
 
         self.lista.append(curso)
 
@@ -105,8 +180,18 @@ class Cursos:
     def verificar_tag(self, nome: CursoTag) -> bool:
         return bool(self.tags.get(nome))
 
-    def pegar_codigo(self, nome: CursoTag) -> int:
-        return self.tags[nome]
+    def pegar_codigo(self, nome: CursoTag) -> int | None:
+        return self.tags.get(nome)
+
+    def pegar_identificador(self, codigo: int) -> CursoIdentificador | None:
+        for curso in self.lista:
+            if curso.codigo == codigo:
+                return curso.identificador
+
+        return None
+
+    def esta_vazio(self) -> bool:
+        return len(self.lista) == 0
 
 
 @dataclass
@@ -124,96 +209,190 @@ class Disciplinas:
         self.lista = []
 
 
-TAB_TAMANHO = 8
-
-
-def linha(simbolo: str, tamanho: int):
-    print(f"{simbolo * tamanho}")
-
-
-def titulo(texto: str):
-    tamanho = TAB_TAMANHO * 2 + len(texto)
-    tab = " " * TAB_TAMANHO
-
-    linha("=", tamanho)
-    print(f"{tab}{texto}")
-    linha("=", tamanho)
-
-
-def subtitulo(texto: str):
-    tamanho = TAB_TAMANHO * 2 + len(texto)
-    tab = " " * TAB_TAMANHO
-
-    print(tab, end="")
-    linha("=", tamanho)
-    print(f"{tab}{tab}{texto}")
-    print(tab, end="")
-    linha("=", tamanho)
-
-
 # Se o curso não existir, perguntar se não deseja criar um com o mesmo nome.
 def curso_perguntar_codigo(cursos: Cursos) -> int:
     identificador = CursoIdentificador(leia.string("Digite o nome do curso"))
 
-    if not cursos.verificar_tag(identificador.tag):
-        subtitulo(f'Criando o novo curso "{identificador.nome}"')
+    if not garantir_curso(cursos, identificador):
+        return -1
+
+    codigo = cursos.pegar_codigo(identificador.tag)
+
+    if codigo is None:
+        exit(10)
+
+    return codigo
+
+
+def garantir_curso(cursos: Cursos, identificador: CursoIdentificador) -> bool:
+    if cursos.pegar_codigo(identificador.tag):
+        return True
+
+    style.erro(f'Não existe nenhum curso chamado "{identificador.nome}"')
+
+    confirmacao = leia.confirmar("Deseja criar um")
+
+    if confirmacao:
         curso_criar(cursos, identificador)
 
-    return cursos.pegar_codigo(identificador.tag)
+    # TODO: Pedir para o usuário digitar novamente o nome (pode ter sido um erro de digitação).
+
+    return False
 
 
-def aluno_incluir(alunos: Alunos, cursos: Cursos):
-    nome = leia.string("Digite o nome")
+# TODO: Antes de concluir, perguntar se não tem nada para mudar
+def alunos_cadastrar(alunos: Alunos, cursos: Cursos):
+    style.titulo_2("Cadastrar aluno")
+
+    nome = leia.string("Digite o nome completo")
     cpf = leia.cpf()
     telefone = leia.telefone()
     email = leia.email()
 
     codigo_curso = curso_perguntar_codigo(cursos)
 
-    info_pessoal = InfoPessoal(nome=nome, cpf=cpf, telefone=telefone, email=email)
+    privado = AlunoPrivado(cpf=cpf)
 
-    alunos.adicionar(info_pessoal, codigo_curso)
+    publico = AlunoPublico(nome=nome, telefone=telefone, email=email, codigo_curso=codigo_curso)
+
+    alunos.adicionar(privado, publico)
+
+    style.sucesso("Aluno cadastrado")
 
 
-def aluno_alterar(alunos: Alunos):
+def alunos_alterar(alunos: Alunos):
+    # 1. Qual aluno vai alterar (Busca)?
+    # 2. O que vai alterar
     pass
 
 
-def aluno_buscar(alunos: Alunos):
+def garantir_aluno(alunos: Alunos, cursos: Cursos) -> bool:
+    """
+    @return True se há alunos foi cadastrados, False caso contrário.
+    """
+    if not alunos.esta_vazio():
+        return True
+
+    style.erro("Não existe alunos cadastrados")
+
+    confirmacao = leia.confirmar("Deseja cadastar um")
+
+    if confirmacao:
+        alunos_cadastrar(alunos, cursos)
+
+    return False
+
+
+def alunos_buscar(alunos: Alunos, cursos: Cursos):
+    buscar_opcoes = {"nome": 1, "email": 2, "telefone": 3, "curso": 4, "prontuario": 5}
+
+    style.titulo_2("Buscando alunos")
+
+    if not garantir_aluno(alunos, cursos):
+        return
+
+    opcoes = leia.varias_opcoes_entre(buscar_opcoes)
+
+    if opcoes is None:
+        return
+
+    selecionadas = {}
+
+    for opcao in opcoes:
+        if opcao == buscar_opcoes["nome"]:
+            selecionadas["nome"] = leia.string("Digite o nome")
+        elif opcao == buscar_opcoes["email"]:
+            selecionadas["email"] = leia.email()
+        elif opcao == buscar_opcoes["telefone"]:
+            selecionadas["telefone"] = leia.string("Digite o telefone")
+        elif opcao == buscar_opcoes["curso"]:
+            selecionadas["codigo_curso"] = curso_perguntar_codigo(cursos)
+        elif opcao == buscar_opcoes["prontuario"]:
+            selecionadas["prontuario"] = leia.inteiro_maior_igual("Digite o prontuário", 0)
+        else:
+            return
+
+    encontrado = alunos.buscar(selecionadas)
+
+    style.separador()
+
+    if len(encontrado) == 0:
+        style.erro("Nenhum resultado foi encontrado")
+    else:
+        for e in encontrado:
+            mostrar_aluno(e, cursos)
+        style.sucesso("Busca feita")
+
+
+def alunos_excluir(alunos: Alunos):
     pass
 
 
-def aluno_excluir(alunos: Alunos):
-    pass
+def mostrar_aluno(aluno: AlunoPublico, cursos: Cursos):
+    curso_codigo = aluno.codigo_curso
+    curso_ident = cursos.pegar_identificador(curso_codigo)
+
+    if curso_ident is None:
+        exit(11)
+
+    style.titulo_3(aluno.nome)
+    style.lista(
+        [
+            f"Email: {aluno.email}",
+            f"Telefone: {aluno.telefone}",
+            f"Prontuário: {aluno.prontuario}",
+            f"Curso: {curso_ident.nome} | {curso_codigo}",
+        ]
+    )
+
+    style.separador()
 
 
-def menu_aluno(alunos: Alunos, cursos: Cursos):
-    aluno_opcoes = {"incluir": 1, "excluir": 2, "alterar": 3, "buscar": 4}
+def alunos_listar(alunos: Alunos, cursos: Cursos):
+    if not garantir_aluno(alunos, cursos):
+        return
+
+    style.titulo_2("Listando os alunos")
+
+    compartilhar = alunos.lista_publica()
+
+    for aluno in compartilhar:
+        mostrar_aluno(aluno, cursos)
+
+
+def alunos_menu(alunos: Alunos, cursos: Cursos):
+    aluno_opcoes = {"cadastrar": 1, "excluir": 2, "alterar": 3, "buscar": 4, "listar": 5}
 
     while True:
-        titulo("Aluno")
+        style.titulo_1("Aluno")
 
-        opcao = leia.opcao_entre(aluno_opcoes)
+        opcao = leia.uma_opcao_entre(aluno_opcoes)
 
-        if opcao == aluno_opcoes["incluir"]:
-            aluno_incluir(alunos, cursos)
+        if opcao == aluno_opcoes["cadastrar"]:
+            alunos_cadastrar(alunos, cursos)
         elif opcao == aluno_opcoes["alterar"]:
-            aluno_alterar(alunos)
+            alunos_alterar(alunos)
         elif opcao == aluno_opcoes["buscar"]:
-            aluno_buscar(alunos)
+            alunos_buscar(alunos, cursos)
         elif opcao == aluno_opcoes["excluir"]:
-            aluno_excluir(alunos)
+            alunos_excluir(alunos)
+        elif opcao == aluno_opcoes["listar"]:
+            alunos_listar(alunos, cursos)
         else:
             break
 
 
 def curso_criar(cursos: Cursos, identificador: CursoIdentificador | None):
     if identificador is None:
+        style.titulo_2("Criando novo curso")
         identificador = CursoIdentificador(leia.string("Digite o nome do curso"))
+    else:
+        style.titulo_2(f'Criando o novo curso "{identificador.nome}"')
 
     semestres = leia.inteiro_positivo("Quantidade de semestres")
 
     cursos.adicionar(identificador, semestres)
+    style.sucesso("Curso criado")
 
 
 def curso_mostrar_alunos(cursos):
@@ -226,9 +405,9 @@ def menu_curso(cursos: Cursos):
     }
 
     while True:
-        titulo("Curso")
+        style.titulo_1("Curso")
 
-        opcao = leia.opcao_entre(curso_opcoes)
+        opcao = leia.uma_opcao_entre(curso_opcoes)
 
         if opcao == curso_opcoes["alunos"]:
             curso_mostrar_alunos(cursos)
@@ -248,9 +427,9 @@ def menu_disciplina(disciplinas: Disciplinas):
     disciplina_opcoes = {"buscar_semestre": 1, "buscar_curso": 2}
 
     while True:
-        titulo("Disciplina")
+        style.titulo_1("Disciplina")
 
-        opcao = leia.opcao_entre(disciplina_opcoes)
+        opcao = leia.uma_opcao_entre(disciplina_opcoes)
 
         if opcao == disciplina_opcoes["buscar_curso"]:
             disciplina_buscar_curso(disciplinas)
@@ -261,15 +440,19 @@ def menu_disciplina(disciplinas: Disciplinas):
 
 
 def menu_principal(alunos: Alunos, cursos: Cursos, disciplinas: Disciplinas):
-    area_opcoes: dict[str, int] = {"aluno": 1, "curso": 2, "disciplina": 3}
+    area_opcoes: dict[str, int] = {
+        "aluno": 1,
+        "curso": 2,
+        "disciplina": 3,
+    }
 
     while True:
-        titulo("Menu Principal")
+        style.titulo_1("Menu Principal")
 
-        opcao = leia.opcao_entre(area_opcoes)
+        opcao = leia.uma_opcao_entre(area_opcoes)
 
         if opcao == area_opcoes["aluno"]:
-            menu_aluno(alunos, cursos)
+            alunos_menu(alunos, cursos)
         elif opcao == area_opcoes["curso"]:
             menu_curso(cursos)
         elif opcao == area_opcoes["disciplina"]:
@@ -277,11 +460,54 @@ def menu_principal(alunos: Alunos, cursos: Cursos, disciplinas: Disciplinas):
         else:
             break
 
+    style.aviso("Tchau, Tchau!")
+
+
+def adicionar_cursos_teste(cursos: Cursos):
+    cursos.adicionar(identificador=CursoIdentificador("Ciência da Computação"), semestres=8)
+
+    cursos.adicionar(identificador=CursoIdentificador("Pedagogia"), semestres=6)
+
+
+def adicionar_alunos_teste(alunos: Alunos, cursos: Cursos):
+    comp = CursoTag("Ciência da Computação")
+    comp_codigo = cursos.pegar_codigo(comp)
+    if comp_codigo is None:
+        exit(13)
+
+    peda = CursoTag("Pedagogia")
+    peda_codigo = cursos.pegar_codigo(peda)
+    if peda_codigo is None:
+        exit(13)
+
+    alunos.adicionar(
+        privado=AlunoPrivado(cpf="123.456.789-10"),
+        publico=AlunoPublico(
+            nome="Pedro Henrique",
+            telefone="(12) 1234-5678",
+            email="pedro.henrique@gmail.com",
+            codigo_curso=comp_codigo,
+        ),
+    )
+
+    alunos.adicionar(
+        privado=AlunoPrivado(cpf="334.112.789-90"),
+        publico=AlunoPublico(
+            nome="Ana Luísa",
+            telefone="(12) 0987-1234",
+            email="ana.lulu@gmail.com",
+            codigo_curso=peda_codigo,
+        ),
+    )
+
 
 def main():
     alunos = Alunos()
     cursos = Cursos()
     disciplinas = Disciplinas()
+
+    adicionar_cursos_teste(cursos)
+    adicionar_alunos_teste(alunos, cursos)
 
     menu_principal(alunos, cursos, disciplinas)
 
