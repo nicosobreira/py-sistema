@@ -1,6 +1,6 @@
 import re
 
-from . import style
+from .. import style
 
 OPCAO_VOLTAR = 0
 
