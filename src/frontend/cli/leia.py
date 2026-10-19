@@ -1,48 +1,62 @@
 import re
 
-from . import style
+import sistema.erros
+from sistema.tipos.cpf import Cpf
+from sistema.tipos.email import Email
+from sistema.tipos.telefone import Telefone
+
+from . import erros, mostre
 
 OPCAO_VOLTAR = 0
 
 
+def leia():
+    try:
+        entrada = input("> ")
+    except KeyboardInterrupt:
+        exit()
+
+    return entrada
+
+
 def string(mensagem: str) -> str:
-    style.mensagem(f"{mensagem}.")
-    return input("> ")
+    mostre.mensagem(f"{mensagem}")
+    return leia()
 
 
 def inteiro_entre(mensagem: str, maximo: int) -> int:
     minimo = OPCAO_VOLTAR
 
-    style.mensagem(mensagem + " (0 para voltar)")
+    mostre.mensagem(mensagem + f" ({OPCAO_VOLTAR} para voltar)")
     while True:
         try:
-            resposta = int(input("> "))
+            resposta = int(leia())
         except ValueError:
-            style.erro("Digite um número!")
+            mostre.erro("Digite um número!")
             continue
 
         if minimo <= resposta <= maximo:
             return resposta
         else:
-            style.erro(f"Opção inválida! Escolha entre: {minimo} e {maximo}.")
+            mostre.erro(f"Opção inválida! Escolha entre: {minimo} e {maximo}.")
 
 
-def varios_inteiros_entre(mensagem: str, maximo: int) -> list[int] | None:
+def varios_inteiros_entre(mensagem: str, maximo: int) -> list[int]:
     minimo = OPCAO_VOLTAR
     respostas = []
 
-    style.mensagem(mensagem)
+    mostre.mensagem(mensagem)
 
     while True:
         try:
-            respostas = list(map(int, input("> ").split(" ")))
+            respostas = list(map(int, leia().split(" ")))
         except ValueError:
-            style.erro("Digite um número!")
+            mostre.erro("Digite um número!")
             continue
 
         for resposta in respostas:
             if resposta > maximo:
-                style.erro(f'Opção "{resposta}" inválida! Escolha entre: {minimo} e {maximo}.')
+                mostre.erro(f'Opção "{resposta}" inválida! Escolha entre: {minimo} e {maximo}.')
                 break
         else:
             break
@@ -55,97 +69,82 @@ def inteiro_positivo(mensagem: str) -> int:
 
 
 def inteiro_maior_igual(mensagem: str, maior_igual: int) -> int:
-    style.mensagem(mensagem)
+    mostre.mensagem(mensagem)
 
     while True:
         try:
-            resposta = int(input("> "))
+            resposta = int(leia())
         except ValueError:
-            style.erro("Digite um número!")
+            mostre.erro("Digite um número!")
             continue
 
         if resposta >= maior_igual:
             return resposta
         else:
-            style.erro(f"Digite um número maior do que {maior_igual}")
+            mostre.erro(f"Digite um número maior do que {maior_igual}!")
 
 
-"""
-def _validar_telefone(tel: str) -> bool:
-    verificar = re.search("^\\(\\d{2}\\) \\d{4}-\\d{4}$", tel)
-
-    return bool(verificar)
-"""
-
-
-def telefone() -> str:
+def telefone() -> Telefone:
     # TODO: Verificar o tamanho do telefone
     while True:
-        tel = string("Digite o telefone")
-
-        return tel
-
-
-"""
-def _validar_cpf(cpf: str) -> bool:
-    verificar = re.search("^\\d{3}\\.\\d{3}\\.\\d{3}-\\d{2}$", cpf)
-
-    return bool(verificar)
-"""
+        try:
+            telefone = Telefone(string("Digite o telefone."))
+        except sistema.erros.CadastroError:
+            mostre.erro("Digite um telefone válido!")
+        else:
+            return telefone
 
 
-def cpf() -> str:
+def cpf() -> Cpf:
     # TODO:Verificar o tamanho do CPF
     while True:
-        cpf = string("Digite o CPF")
-
-        return cpf
-
-
-def _validar_email(email: str) -> bool:
-    verificar = re.search(r"^[\w.-]+@([\w-]+\.)+[\w-]{2,}$", email)
-
-    return bool(verificar)
-
-
-def email() -> str:
-    while True:
-        email = string("Digite o Email")
-
-        if _validar_email(email):
-            return email
+        try:
+            cpf = Cpf(string("Digite o CPF."))
+        except sistema.erros.CadastroError:
+            mostre.erro("Digite um cpf válido!")
         else:
-            style.erro("Formato errado! Digite novamente")
+            return cpf
+
+
+def email() -> Email:
+    while True:
+        try:
+            email = Email(string("Digite o Email."))
+        except sistema.erros.CadastroError:
+            mostre.erro("Digite um email válido!")
+        else:
+            return email
 
 
 def uma_opcao_entre(opcoes: dict[str, int]) -> int:
     maximo = len(opcoes)
 
-    style.mostrar_opcoes(opcoes)
+    mostre.mostrar_opcoes(opcoes)
 
-    return inteiro_entre("Digite uma das opções acima", maximo)
+    return inteiro_entre("Digite uma das opções acima.", maximo)
 
 
-def varias_opcoes_entre(opcoes: dict[str, int]) -> list[int] | None:
+def varias_opcoes_entre(opcoes: dict[str, int]) -> list[int]:
     maximo = len(opcoes)
 
-    style.mostrar_opcoes(opcoes)
+    mostre.mostrar_opcoes(opcoes)
 
     return varios_inteiros_entre(
-        "Digite as opções que deseja escolher separadas por um espaço", maximo
+        f"Digite as opções que deseja escolher separadas por um espaço ({OPCAO_VOLTAR} para sair)",
+        maximo,
     )
 
 
 def confirmar(mensagem: str) -> bool:
     formato = "[S/N]"
-    style.mensagem(f"{mensagem}? {formato}")
+    mostre.mensagem(f"{mensagem} {formato}")
 
     while True:
-        opcao = input("> ").lower()
+        opcao = leia().lower()
 
         if opcao in ("s", "sim"):
             return True
         elif opcao in ("n", "nao", "não"):
             return False
         else:
-            style.erro("Erro, digite novamente")
+            mostre.erro("Erro, digite novamente!")

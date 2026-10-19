@@ -11,7 +11,7 @@ authors = [
 ]
 
 [project.scripts]
-sistema = "sistema.main:main"
+sistema = "main:main"
 
 # Essa é a ferramente empacota e distruibui o código.
 [build-system]
